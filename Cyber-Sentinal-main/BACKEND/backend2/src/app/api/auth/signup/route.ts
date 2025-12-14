@@ -1,0 +1,79 @@
+import { NextResponse, NextRequest } from 'next/server';
+import { dbConnect } from '@/app/lib/db';
+import User from '@/app/models/User';
+import { generateToken, setAuthToken } from '@/app/lib/auth';
+import { corsHeaders, handleCORS, addCorsHeaders, createCorsResponse } from '@/app/lib/cors';
+
+export async function OPTIONS(req: NextRequest) {
+  return handleCORS(req);
+}
+
+export async function POST(req: NextRequest) {
+  if (req.method === 'OPTIONS') {
+    return handleCORS(req);
+  }
+
+  try {
+    const { name, email, password } = await req.json();
+
+    if (!name || !email || !password) {
+      const response = NextResponse.json(
+        { error: 'Name, email, and password are required' },
+        { status: 400 }
+      );
+      return addCorsHeaders(response, req);
+    }
+
+    if (password.length < 6) {
+      const response = NextResponse.json(
+        { error: 'Password must be at least 6 characters long' },
+        { status: 400 }
+      );
+      return addCorsHeaders(response, req);
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      const errorResponse = NextResponse.json(
+        { error: 'Invalid email format' },
+        { status: 400 }
+      );
+      return addCorsHeaders(errorResponse, req);
+    }
+
+    await dbConnect();
+
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      const errorResponse = NextResponse.json(
+        { error: 'User already exists' },
+        { status: 400 }
+      );
+      return addCorsHeaders(errorResponse, req);
+    }
+
+
+    const user = await User.create({ name, email, password });
+
+
+    const token = generateToken(user._id.toString());
+
+    const response = createCorsResponse(
+      { user: { id: user._id, name: user.name, email: user.email } },
+      201,
+      req
+    );
+
+    setAuthToken(response, token);
+    addCorsHeaders(response, req);
+    response.headers.set('Access-Control-Allow-Credentials', 'true');
+    return response;
+  } catch (error) {
+    console.error('Signup error:', error);
+    const errorResponse = NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+    return addCorsHeaders(errorResponse, req);
+  }
+}
